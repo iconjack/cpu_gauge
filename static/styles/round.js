@@ -5,21 +5,21 @@ const SWEEP_START = 150 * DEG;  // ~8 o'clock
 const SWEEP_RANGE = 240 * DEG;  // to ~4 o'clock
 
 const COLORS = {
-    bg: "#0f0f1a",
-    face: "#1a1a2e",
-    speedo_face: "#111122",
+    bg: "#2a2a3a",
+    face: "#c0c0c8",
+    speedo_face: "#e8e8ec",
     rim_light: "#d0d0d8",
     rim_mid: "#888890",
     rim_dark: "#3a3a42",
     rim_edge: "#222228",
-    tick: "#aaaabb",
-    tick_major: "#ccccdd",
-    number: "#999aaa",
+    tick: "#666677",
+    tick_major: "#444455",
+    number: "#555566",
     lamp_on: "#ff8800",
     lamp_off: "#332200",
     needle: "#ee3333",
     needle_cap: "#cccccc",
-    label: "#8888aa",
+    label: "#444455",
 };
 
 export default class RoundStyle extends GaugeStyle {
@@ -45,7 +45,7 @@ export default class RoundStyle extends GaugeStyle {
             lamp_arc_r: R * 0.75,
             speedo_cx: cx,
             speedo_cy: cy + Math.round(R * 0.15),
-            speedo_r: Math.round(R * 0.42),
+            speedo_r: Math.round(R * 0.52),
             font_label: Math.max(10, Math.round(R * 0.09)),
             font_number: Math.max(7, Math.round(R * 0.065)),
         };
@@ -211,13 +211,34 @@ export default class RoundStyle extends GaugeStyle {
 
     _draw_label() {
         const ctx = this.ctx;
-        const { cx, cy, R, font_label } = this.layout;
+        const { cx, cy, speedo_cy, speedo_r, font_label } = this.layout;
 
-        ctx.font = `600 ${font_label}px system-ui, sans-serif`;
+        // Arc the letters "C P U" above the inner gauge
+        const arc_r = speedo_r + font_label * 1.4;
+        const arc_cy = speedo_cy;
+        const letters = ["C", "P", "U"];
+        const letter_spread = 0.12; // radians between letters
+        const arc_center = -Math.PI / 2; // top of arc
+
+        ctx.save();
+        ctx.font = `700 ${font_label}px "Copperplate", "Copperplate Gothic Bold", "Small Caps", serif`;
         ctx.fillStyle = COLORS.label;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText("CPU", cx, cy - R * 0.2);
+
+        for (let i = 0; i < letters.length; i++) {
+            const offset = (i - 1) * letter_spread;
+            const angle = arc_center + offset;
+            const lx = cx + arc_r * Math.cos(angle);
+            const ly = arc_cy + arc_r * Math.sin(angle);
+
+            ctx.save();
+            ctx.translate(lx, ly);
+            ctx.rotate(angle + Math.PI / 2);
+            ctx.fillText(letters[i], 0, 0);
+            ctx.restore();
+        }
+        ctx.restore();
     }
 
     _draw_speedometer(overall) {
