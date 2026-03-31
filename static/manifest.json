@@ -1,0 +1,7 @@
+{
+    "name": "Gauge",
+    "short_name": "Gauge",
+    "display": "fullscreen",
+    "background_color": "#0f0f1a",
+    "theme_color": "#0f0f1a"
+}
