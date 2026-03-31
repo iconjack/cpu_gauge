@@ -27,8 +27,14 @@ function resize_canvas() {
     canvas.style.width = w + "px";
     canvas.style.height = h + "px";
     const ctx = canvas.getContext("2d");
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (style) style.resize(w, h);
+    const rotate = style && style.orientation === "landscape" && h > w;
+    if (rotate) {
+        ctx.setTransform(0, dpr, -dpr, 0, w * dpr, 0);
+        if (style) style.resize(h, w);
+    } else {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        if (style) style.resize(w, h);
+    }
 }
 
 function connect() {
@@ -82,8 +88,16 @@ async function init() {
     }
 
     style.init();
-    style.resize(window.innerWidth, window.innerHeight);
+    resize_canvas();
     connect();
+
+    // Enter fullscreen on first tap (requires user gesture)
+    document.addEventListener("click", function enter_fullscreen() {
+        document.removeEventListener("click", enter_fullscreen);
+        const el = document.documentElement;
+        const req = el.requestFullscreen || el.webkitRequestFullscreen;
+        if (req) req.call(el).then(resize_canvas).catch(function () {});
+    });
 }
 
 init();

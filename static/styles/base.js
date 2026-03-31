@@ -12,6 +12,8 @@ export default class GaugeStyle {
         this.h = 0;
     }
 
+    get orientation() { return "any"; }
+
     init() {}
 
     resize(width, height) {
