@@ -135,7 +135,8 @@ export default class RoundStyle extends GaugeStyle {
         const ctx = this.ctx;
         const { cx, cy, lamp_arc_r, lamp_r } = this.layout;
         const count = per_core.length;
-        const bezel_r = lamp_r * 1.25;
+        const bezel_r = lamp_r * 1.3;
+        const lens_r = lamp_r * 0.92;
 
         for (let i = 0; i < count; i++) {
             const t = count > 1 ? i / (count - 1) : 0.5;
@@ -144,14 +145,15 @@ export default class RoundStyle extends GaugeStyle {
             const ly = cy + lamp_arc_r * Math.sin(angle);
             const b = per_core[i] / 100; // brightness 0..1
 
-            // --- Layer 1: Outer glow (behind everything) ---
+            // --- Layer 1: Outer glow cast onto panel ---
             if (b > 0.05) {
                 ctx.save();
-                ctx.globalAlpha = b * 0.5;
-                const glow_r = lamp_r * 2.5;
-                const glow = ctx.createRadialGradient(lx, ly, lamp_r * 0.3, lx, ly, glow_r);
-                glow.addColorStop(0, "rgba(255, 160, 40, 0.7)");
-                glow.addColorStop(1, "rgba(255, 120, 0, 0)");
+                ctx.globalAlpha = b * 0.6;
+                const glow_r = lamp_r * 3;
+                const glow = ctx.createRadialGradient(lx, ly, lamp_r * 0.2, lx, ly, glow_r);
+                glow.addColorStop(0, "rgba(255, 160, 40, 0.6)");
+                glow.addColorStop(0.4, "rgba(255, 120, 20, 0.2)");
+                glow.addColorStop(1, "rgba(255, 100, 0, 0)");
                 ctx.beginPath();
                 ctx.arc(lx, ly, glow_r, 0, Math.PI * 2);
                 ctx.fillStyle = glow;
@@ -159,55 +161,110 @@ export default class RoundStyle extends GaugeStyle {
                 ctx.restore();
             }
 
-            // --- Layer 2: Bezel (static metal housing) ---
+            // --- Layer 2: Chrome bezel (shiny threaded ring) ---
+            // Conic metallic gradient simulated with arc segments
             ctx.save();
-            ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
-            ctx.shadowBlur = 3;
+            ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+            ctx.shadowBlur = 2;
             ctx.shadowOffsetY = 1;
-            ctx.beginPath();
-            ctx.arc(lx, ly, bezel_r, 0, Math.PI * 2);
-            const bezel_grad = ctx.createRadialGradient(
-                lx - bezel_r * 0.3, ly - bezel_r * 0.3, 0,
-                lx, ly, bezel_r,
-            );
-            bezel_grad.addColorStop(0, "#666666");
-            bezel_grad.addColorStop(0.7, "#444444");
-            bezel_grad.addColorStop(1, "#333333");
-            ctx.fillStyle = bezel_grad;
-            ctx.fill();
+            const bz_steps = 36;
+            const bz_step_angle = (2 * Math.PI) / bz_steps;
+            for (let s = 0; s < bz_steps; s++) {
+                const a0 = s * bz_step_angle;
+                const a1 = a0 + bz_step_angle + 0.02;
+                // Light from upper-left
+                const light = (Math.cos(a0 - 2.3) + 1) / 2;
+                const bv = Math.round(80 + light * 170);
+                ctx.beginPath();
+                ctx.arc(lx, ly, bezel_r, a0, a1);
+                ctx.arc(lx, ly, lens_r + 0.5, a1, a0, true);
+                ctx.closePath();
+                ctx.fillStyle = `rgb(${bv},${bv},${Math.round(bv * 0.97)})`;
+                ctx.fill();
+            }
             ctx.restore();
 
-            // --- Layer 3: Jewel lens (dynamic, brightness-dependent) ---
-            // Off colors: center rgb(200, 120, 40), edge rgb(160, 80, 15)
-            // On colors:  center rgb(255, 240, 200), edge rgb(255, 140, 0)
-            const lens_offset = lamp_r * 0.25;
-            const lens_grad = ctx.createRadialGradient(
-                lx - lens_offset, ly - lens_offset, 0,
-                lx, ly, lamp_r,
-            );
-            const cr = Math.round(200 + b * 55);
-            const cg = Math.round(120 + b * 120);
-            const cb = Math.round(40 + b * 160);
-            const er = Math.round(160 + b * 95);
-            const eg = Math.round(80 + b * 60);
-            const eb = Math.round(15 + b * -15);
-            lens_grad.addColorStop(0, `rgb(${cr},${cg},${cb})`);
-            lens_grad.addColorStop(1, `rgb(${er},${eg},${eb})`);
-            ctx.beginPath();
-            ctx.arc(lx, ly, lamp_r, 0, Math.PI * 2);
-            ctx.fillStyle = lens_grad;
-            ctx.fill();
-
-            // --- Layer 4: Glass specular highlight (always visible) ---
+            // Knurled edge — fine radial lines on bezel
             ctx.save();
+            ctx.globalAlpha = 0.15;
+            const knurl_steps = 24;
+            for (let k = 0; k < knurl_steps; k++) {
+                const ka = (k / knurl_steps) * Math.PI * 2;
+                ctx.beginPath();
+                ctx.moveTo(lx + bezel_r * Math.cos(ka), ly + bezel_r * Math.sin(ka));
+                ctx.lineTo(lx + (lens_r + 1) * Math.cos(ka), ly + (lens_r + 1) * Math.sin(ka));
+                ctx.strokeStyle = "#000";
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+            }
+            ctx.restore();
+
+            // --- Layer 3: Dark recess between bezel and lens ---
             ctx.beginPath();
-            const spec_r = lamp_r * 0.35;
-            const spec_x = lx - lamp_r * 0.2;
-            const spec_y = ly - lamp_r * 0.35;
-            ctx.ellipse(spec_x, spec_y, spec_r, spec_r * 0.6, -0.3, 0, Math.PI * 2);
-            ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+            ctx.arc(lx, ly, lens_r + 0.5, 0, Math.PI * 2);
+            ctx.fillStyle = "#1a1a1a";
+            ctx.fill();
+
+            // --- Layer 4: Convex dome lens ---
+            // Base fill — the dome color
+            const dome_offset_x = lens_r * 0.3;
+            const dome_offset_y = lens_r * 0.3;
+            const dome_grad = ctx.createRadialGradient(
+                lx - dome_offset_x, ly - dome_offset_y, lens_r * 0.05,
+                lx + dome_offset_x * 0.3, ly + dome_offset_y * 0.3, lens_r,
+            );
+            // Off: warm orange glass. On: hot center fading to saturated orange
+            const cr = Math.round(210 + b * 45);
+            const cg = Math.round(130 + b * 110);
+            const cb = Math.round(50 + b * 150);
+            const mr = Math.round(190 + b * 65);
+            const mg = Math.round(95 + b * 55);
+            const mb = Math.round(20 + b * -5);
+            const er = Math.round(130 + b * 80);
+            const eg = Math.round(60 + b * 30);
+            const eb = Math.round(15 + b * -5);
+            dome_grad.addColorStop(0, `rgb(${cr},${cg},${cb})`);
+            dome_grad.addColorStop(0.5, `rgb(${mr},${mg},${mb})`);
+            dome_grad.addColorStop(1, `rgb(${er},${eg},${eb})`);
+            ctx.beginPath();
+            ctx.arc(lx, ly, lens_r, 0, Math.PI * 2);
+            ctx.fillStyle = dome_grad;
+            ctx.fill();
+
+            // Dome edge darkening — simulates curvature rolling away
+            const edge_grad = ctx.createRadialGradient(lx, ly, lens_r * 0.5, lx, ly, lens_r);
+            edge_grad.addColorStop(0, "rgba(0, 0, 0, 0)");
+            edge_grad.addColorStop(0.7, "rgba(0, 0, 0, 0)");
+            edge_grad.addColorStop(1, "rgba(0, 0, 0, 0.3)");
+            ctx.beginPath();
+            ctx.arc(lx, ly, lens_r, 0, Math.PI * 2);
+            ctx.fillStyle = edge_grad;
+            ctx.fill();
+
+            // --- Layer 5: Primary specular highlight (dome reflection) ---
+            ctx.save();
+            const hl_x = lx - lens_r * 0.25;
+            const hl_y = ly - lens_r * 0.3;
+            const hl_r = lens_r * 0.45;
+            const hl_grad = ctx.createRadialGradient(hl_x, hl_y, 0, hl_x, hl_y, hl_r);
+            hl_grad.addColorStop(0, `rgba(255, 255, 255, ${0.35 + b * 0.25})`);
+            hl_grad.addColorStop(0.5, `rgba(255, 255, 240, ${0.12 + b * 0.1})`);
+            hl_grad.addColorStop(1, "rgba(255, 255, 255, 0)");
+            ctx.beginPath();
+            ctx.arc(hl_x, hl_y, hl_r, 0, Math.PI * 2);
+            ctx.fillStyle = hl_grad;
             ctx.fill();
             ctx.restore();
+
+            // --- Layer 6: Small sharp specular (room light pinpoint) ---
+            ctx.beginPath();
+            const pin_x = lx - lens_r * 0.2;
+            const pin_y = ly - lens_r * 0.28;
+            const pin_r = lens_r * 0.12;
+            ctx.arc(pin_x, pin_y, pin_r, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + b * 0.3})`;
+            ctx.fill();
+
         }
     }
 
