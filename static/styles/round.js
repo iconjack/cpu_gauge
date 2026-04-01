@@ -3,6 +3,8 @@ import GaugeStyle from "./base.js";
 const DEG = Math.PI / 180;
 const SWEEP_START = 150 * DEG;  // ~8 o'clock
 const SWEEP_RANGE = 240 * DEG;  // to ~4 o'clock
+const LAMP_SWEEP_RANGE = 120 * DEG;
+const LAMP_SWEEP_START = (270 * DEG) - (LAMP_SWEEP_RANGE / 2);
 
 const COLORS = {
     bg: "#2a2a3a",
@@ -41,7 +43,7 @@ export default class RoundStyle extends GaugeStyle {
         this.layout = {
             cx, cy, R,
             rim_width: Math.max(4, Math.round(R * 0.06)),
-            lamp_r: Math.max(3, Math.round(R * 0.055)),
+            lamp_r: Math.max(3, Math.round(R * 0.048)),
             lamp_arc_r: R * 0.75,
             speedo_cx: cx,
             speedo_cy: cy + Math.round(R * 0.15),
@@ -137,7 +139,7 @@ export default class RoundStyle extends GaugeStyle {
 
         for (let i = 0; i < count; i++) {
             const t = count > 1 ? i / (count - 1) : 0.5;
-            const angle = SWEEP_START + t * SWEEP_RANGE;
+            const angle = LAMP_SWEEP_START + t * LAMP_SWEEP_RANGE;
             const lx = cx + lamp_arc_r * Math.cos(angle);
             const ly = cy + lamp_arc_r * Math.sin(angle);
             const b = per_core[i] / 100; // brightness 0..1
