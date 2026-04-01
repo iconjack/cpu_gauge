@@ -176,19 +176,19 @@ export default class RoundStyle extends GaugeStyle {
             ctx.restore();
 
             // --- Layer 3: Jewel lens (dynamic, brightness-dependent) ---
-            // Off colors: center rgb(140, 80, 20), edge rgb(60, 30, 8)
+            // Off colors: center rgb(200, 120, 40), edge rgb(160, 80, 15)
             // On colors:  center rgb(255, 240, 200), edge rgb(255, 140, 0)
             const lens_offset = lamp_r * 0.25;
             const lens_grad = ctx.createRadialGradient(
                 lx - lens_offset, ly - lens_offset, 0,
                 lx, ly, lamp_r,
             );
-            const cr = Math.round(140 + b * 115);
-            const cg = Math.round(80 + b * 160);
-            const cb = Math.round(20 + b * 180);
-            const er = Math.round(60 + b * 195);
-            const eg = Math.round(30 + b * 110);
-            const eb = Math.round(8 + b * -8);
+            const cr = Math.round(200 + b * 55);
+            const cg = Math.round(120 + b * 120);
+            const cb = Math.round(40 + b * 160);
+            const er = Math.round(160 + b * 95);
+            const eg = Math.round(80 + b * 60);
+            const eb = Math.round(15 + b * -15);
             lens_grad.addColorStop(0, `rgb(${cr},${cg},${cb})`);
             lens_grad.addColorStop(1, `rgb(${er},${eg},${eb})`);
             ctx.beginPath();
@@ -221,7 +221,7 @@ export default class RoundStyle extends GaugeStyle {
         const arc_center = -Math.PI / 2; // top of arc
 
         ctx.save();
-        ctx.font = `700 ${font_label}px "Copperplate", "Copperplate Gothic Bold", "Small Caps", serif`;
+        ctx.font = `${font_label}px "Limelight", serif`;
         ctx.fillStyle = COLORS.label;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
