@@ -432,8 +432,9 @@ export default class RoundStyle extends GaugeStyle {
         const ctx = this.ctx;
         const { speedo_cx: sx, speedo_cy: sy, speedo_r: sr } = this.layout;
 
-        // Format to 12 digits, zero-padded
-        const digits = String(instructions).padStart(12, "0").slice(-12);
+        // Show billions of instructions, 6 digits zero-padded
+        const billions = Math.floor(instructions / 1e9);
+        const digits = String(billions).padStart(12, "0").slice(-12);
 
         // Position in the dead zone at the bottom of the speedometer
         const digit_count = 12;
@@ -472,5 +473,13 @@ export default class RoundStyle extends GaugeStyle {
             ctx.fillStyle = "#ccddcc";
             ctx.fillText(digits[i], dx + digit_w / 2, dy + digit_h / 2 + 1);
         }
+
+        // "×billion" label underneath
+        const label_size = Math.max(6, Math.round(digit_h * 0.5));
+        ctx.font = `600 ${label_size}px "Jost", sans-serif`;
+        ctx.fillStyle = "#888888";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText("\u00d7billion", sx, odo_y + digit_h + pad + 2);
     }
 }
