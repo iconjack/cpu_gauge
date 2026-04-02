@@ -8,7 +8,7 @@ const LAMP_SWEEP_START = (270 * DEG) - (LAMP_SWEEP_RANGE / 2);
 
 const COLORS = {
     bg: "#2a2a3a",
-    face: "#c0c0c8",
+    face: "#d4cfc2",
     speedo_face: "#e8e8ec",
     rim_light: "#d0d0d8",
     rim_mid: "#888890",
@@ -23,6 +23,21 @@ const COLORS = {
     needle_cap: "#cccccc",
     label: "#444455",
 };
+
+function round_rect(ctx, x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+}
 
 export default class RoundStyle extends GaugeStyle {
     get orientation() { return "landscape"; }
@@ -74,8 +89,10 @@ export default class RoundStyle extends GaugeStyle {
         this._draw_chrome_rim();
         this._draw_gauge_face();
         this._draw_core_lamps(cpu.per_core);
-        this._draw_label();
+        this._draw_cores_label();
         this._draw_speedometer(cpu.overall);
+        this._draw_odometer(cpu.instructions_retired);
+        this._draw_cpu_label();
     }
 
     _draw_chrome_rim() {
@@ -94,9 +111,9 @@ export default class RoundStyle extends GaugeStyle {
             const light_angle = a0 + Math.PI * 0.75;
             const t = (Math.cos(light_angle) + 1) / 2; // 0 = dark, 1 = bright
 
-            const r = Math.round(58 + t * 150);
-            const g = Math.round(58 + t * 150);
-            const b = Math.round(62 + t * 148);
+            const r = Math.round(100 + t * 155);
+            const g = Math.round(105 + t * 150);
+            const b = Math.round(115 + t * 140);
 
             ctx.beginPath();
             ctx.arc(cx, cy, R, a0, a1);
@@ -268,25 +285,25 @@ export default class RoundStyle extends GaugeStyle {
         }
     }
 
-    _draw_label() {
+    _draw_cores_label() {
         const ctx = this.ctx;
-        const { cx, cy, speedo_cy, speedo_r, font_label } = this.layout;
+        const { cx, speedo_cy, speedo_r, font_label } = this.layout;
 
-        // Arc the letters "C P U" above the inner gauge
+        // Arc the letters "CORES" above the inner gauge
         const arc_r = speedo_r + font_label * 1.4;
         const arc_cy = speedo_cy;
-        const letters = ["C", "P", "U"];
-        const letter_spread = 0.12; // radians between letters
+        const letters = ["C", "O", "R", "E", "S"];
+        const letter_spread = 0.1; // radians between letters
         const arc_center = -Math.PI / 2; // top of arc
 
         ctx.save();
-        ctx.font = `${font_label}px "Limelight", serif`;
+        ctx.font = `600 ${font_label}px "Jost", sans-serif`;
         ctx.fillStyle = COLORS.label;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
         for (let i = 0; i < letters.length; i++) {
-            const offset = (i - 1) * letter_spread;
+            const offset = (i - (letters.length - 1) / 2) * letter_spread;
             const angle = arc_center + offset;
             const lx = cx + arc_r * Math.cos(angle);
             const ly = arc_cy + arc_r * Math.sin(angle);
@@ -298,6 +315,20 @@ export default class RoundStyle extends GaugeStyle {
             ctx.restore();
         }
         ctx.restore();
+    }
+
+    _draw_cpu_label() {
+        const ctx = this.ctx;
+        const { cx, speedo_cy, speedo_r, font_label } = this.layout;
+
+        const label_y = speedo_cy + speedo_r + font_label * 1.3;
+        ctx.font = `600 ${font_label}px "Jost", sans-serif`;
+        ctx.fillStyle = COLORS.label;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.letterSpacing = "0.15em";
+        ctx.fillText("CPU", cx, label_y);
+        ctx.letterSpacing = "0px";
     }
 
     _draw_speedometer(overall) {
@@ -394,5 +425,52 @@ export default class RoundStyle extends GaugeStyle {
         cap_grad.addColorStop(1, "#888888");
         ctx.fillStyle = cap_grad;
         ctx.fill();
+    }
+
+    _draw_odometer(instructions) {
+        if (instructions == null) return;
+        const ctx = this.ctx;
+        const { speedo_cx: sx, speedo_cy: sy, speedo_r: sr } = this.layout;
+
+        // Format to 12 digits, zero-padded
+        const digits = String(instructions).padStart(12, "0").slice(-12);
+
+        // Position in the dead zone at the bottom of the speedometer
+        const digit_count = 12;
+        const digit_h = Math.max(8, Math.round(sr * 0.13));
+        const digit_w = Math.round(digit_h * 0.65);
+        const gap = Math.max(1, Math.round(digit_w * 0.08));
+        const total_w = digit_count * digit_w + (digit_count - 1) * gap;
+        const odo_x = sx - total_w / 2;
+        const odo_y = sy + sr * 0.55;
+
+        // Odometer background
+        const pad = Math.round(digit_h * 0.15);
+        round_rect(ctx,
+            odo_x - pad, odo_y - pad,
+            total_w + pad * 2, digit_h + pad * 2,
+            3);
+        ctx.fillStyle = "#111111";
+        ctx.fill();
+
+        // Individual digit cells
+        const font_size = Math.round(digit_h * 0.85);
+        ctx.font = `600 ${font_size}px "Jost", monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        for (let i = 0; i < digit_count; i++) {
+            const dx = odo_x + i * (digit_w + gap);
+            const dy = odo_y;
+
+            // Cell background — alternating subtle shades
+            round_rect(ctx, dx, dy, digit_w, digit_h, 2);
+            ctx.fillStyle = i % 2 === 0 ? "#1a1a1a" : "#1f1f1f";
+            ctx.fill();
+
+            // Digit
+            ctx.fillStyle = "#ccddcc";
+            ctx.fillText(digits[i], dx + digit_w / 2, dy + digit_h / 2 + 1);
+        }
     }
 }

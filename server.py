@@ -8,8 +8,12 @@
 # ///
 
 import asyncio
+import ctypes
+import ctypes.util
 import json
+import os
 import socket
+import struct
 import time
 from pathlib import Path
 
@@ -20,6 +24,132 @@ HOST = "0.0.0.0"
 PORT = 8080
 INTERVAL = 1.0
 STATIC_DIR = Path(__file__).parent / "static"
+
+# perf_event_open constants
+_NR_PERF_EVENT_OPEN = 298  # x86_64
+_PERF_TYPE_HARDWARE = 0
+_PERF_COUNT_HW_INSTRUCTIONS = 1
+_EXCLUDE_KERNEL_HV = 0x60  # exclude_kernel | exclude_hv bits
+
+
+class InstructionsCounter:
+    """Reads hardware 'instructions retired' counter via perf_event_open."""
+
+    def __init__(self):
+        self.fds = []
+        self.mode = None
+        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
+        attr = self._make_attr()
+
+        # Try system-wide first (needs perf_event_paranoid <= 1)
+        ncpu = os.cpu_count() or 1
+        fds = []
+        ok = True
+        for cpu in range(ncpu):
+            fd = libc.syscall(
+                _NR_PERF_EVENT_OPEN,
+                ctypes.c_char_p(attr), ctypes.c_int(-1),
+                ctypes.c_int(cpu), ctypes.c_int(-1), ctypes.c_ulong(0),
+            )
+            if fd < 0:
+                for f in fds:
+                    os.close(f)
+                fds = []
+                ok = False
+                break
+            fds.append(fd)
+
+        if ok:
+            self.fds = fds
+            self.mode = "system-wide"
+            return
+
+        # System-wide failed — offer to fix perf_event_paranoid
+        import subprocess
+        import getpass
+        paranoid_path = "/proc/sys/kernel/perf_event_paranoid"
+        current = int(open(paranoid_path).read().strip())
+        if current > -1:
+            while True:
+                try:
+                    password = getpass.getpass("Enter password for system odometer: ")
+                except EOFError:
+                    break
+                if not password:
+                    break
+                result = subprocess.run(
+                    ["sudo", "-kS", "-p", "", "sysctl", "-q",
+                     "kernel.perf_event_paranoid=-1"],
+                    input=password + "\n", text=True,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+                if result.returncode != 0:
+                    continue
+                # Verify it actually changed
+                new_val = int(open(paranoid_path).read().strip())
+                if new_val > -1:
+                    continue
+                # Retry system-wide
+                fds = []
+                for cpu in range(ncpu):
+                    fd = libc.syscall(
+                        _NR_PERF_EVENT_OPEN,
+                        ctypes.c_char_p(attr), ctypes.c_int(-1),
+                        ctypes.c_int(cpu), ctypes.c_int(-1),
+                        ctypes.c_ulong(0),
+                    )
+                    if fd < 0:
+                        for f in fds:
+                            os.close(f)
+                        fds = []
+                        break
+                    fds.append(fd)
+                if fds:
+                    self.fds = fds
+                    self.mode = "system-wide"
+                    return
+                break
+
+        # Fall back to self-process (needs perf_event_paranoid <= 2)
+        fd = libc.syscall(
+            _NR_PERF_EVENT_OPEN,
+            ctypes.c_char_p(attr), ctypes.c_int(0),
+            ctypes.c_int(-1), ctypes.c_int(-1), ctypes.c_ulong(0),
+        )
+        if fd >= 0:
+            self.fds = [fd]
+            self.mode = "self"
+            return
+
+    @staticmethod
+    def _make_attr():
+        buf = bytearray(120)
+        struct.pack_into("<IIQ", buf, 0,
+                         _PERF_TYPE_HARDWARE, 120, _PERF_COUNT_HW_INSTRUCTIONS)
+        struct.pack_into("<Q", buf, 40, _EXCLUDE_KERNEL_HV)
+        return bytes(buf)
+
+    def read(self):
+        total = 0
+        for fd in self.fds:
+            data = os.read(fd, 8)
+            total += struct.unpack("<Q", data)[0]
+        return total
+
+    def close(self):
+        for fd in self.fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        self.fds = []
+
+
+instructions_counter = InstructionsCounter()
+if instructions_counter.mode:
+    print(f"Instructions counter: {instructions_counter.mode}")
+else:
+    print("Instructions counter: unavailable (perf_event_paranoid too high)")
 
 
 def collect_metrics() -> dict:
@@ -43,6 +173,13 @@ def collect_metrics() -> dict:
     except Exception:
         pass
 
+    instructions = None
+    if instructions_counter.mode:
+        try:
+            instructions = instructions_counter.read()
+        except Exception:
+            pass
+
     return {
         "hostname": socket.gethostname(),
         "timestamp": time.time(),
@@ -52,6 +189,7 @@ def collect_metrics() -> dict:
             "per_core": cpu_per_core,
             "count_logical": psutil.cpu_count(logical=True),
             "count_physical": psutil.cpu_count(logical=False),
+            "instructions_retired": instructions,
         },
         "memory": {
             "total_bytes": mem.total,
