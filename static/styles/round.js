@@ -165,11 +165,12 @@ export default class RoundStyle extends GaugeStyle {
             // --- Layer 1: Outer glow cast onto panel ---
             if (b > 0.05) {
                 ctx.save();
-                ctx.globalAlpha = b * 0.6;
-                const glow_r = lamp_r * 3;
-                const glow = ctx.createRadialGradient(lx, ly, lamp_r * 0.2, lx, ly, glow_r);
-                glow.addColorStop(0, "rgba(255, 160, 40, 0.6)");
-                glow.addColorStop(0.4, "rgba(255, 120, 20, 0.2)");
+                ctx.globalAlpha = b * 0.8;
+                const glow_r = lamp_r * 4.5;
+                const glow = ctx.createRadialGradient(lx, ly, lamp_r * 0.1, lx, ly, glow_r);
+                glow.addColorStop(0, "rgba(255, 170, 50, 0.8)");
+                glow.addColorStop(0.25, "rgba(255, 140, 30, 0.4)");
+                glow.addColorStop(0.5, "rgba(255, 120, 20, 0.15)");
                 glow.addColorStop(1, "rgba(255, 100, 0, 0)");
                 ctx.beginPath();
                 ctx.arc(lx, ly, glow_r, 0, Math.PI * 2);
@@ -230,16 +231,16 @@ export default class RoundStyle extends GaugeStyle {
                 lx - dome_offset_x, ly - dome_offset_y, lens_r * 0.05,
                 lx + dome_offset_x * 0.3, ly + dome_offset_y * 0.3, lens_r,
             );
-            // Off: warm orange glass. On: hot center fading to saturated orange
+            // Off: warm orange glass. On: white-hot center fading to vivid orange
             const cr = Math.round(210 + b * 45);
-            const cg = Math.round(130 + b * 110);
-            const cb = Math.round(50 + b * 150);
+            const cg = Math.round(130 + b * 125);
+            const cb = Math.round(50 + b * 205);
             const mr = Math.round(190 + b * 65);
-            const mg = Math.round(95 + b * 55);
-            const mb = Math.round(20 + b * -5);
-            const er = Math.round(130 + b * 80);
-            const eg = Math.round(60 + b * 30);
-            const eb = Math.round(15 + b * -5);
+            const mg = Math.round(95 + b * 105);
+            const mb = Math.round(20 + b * 30);
+            const er = Math.round(140 + b * 115);
+            const eg = Math.round(65 + b * 70);
+            const eb = Math.round(15 + b * 10);
             dome_grad.addColorStop(0, `rgb(${cr},${cg},${cb})`);
             dome_grad.addColorStop(0.5, `rgb(${mr},${mg},${mb})`);
             dome_grad.addColorStop(1, `rgb(${er},${eg},${eb})`);
@@ -248,11 +249,12 @@ export default class RoundStyle extends GaugeStyle {
             ctx.fillStyle = dome_grad;
             ctx.fill();
 
-            // Dome edge darkening — simulates curvature rolling away
+            // Dome edge darkening — reduced when bright
+            const edge_dark = 0.3 - b * 0.15;
             const edge_grad = ctx.createRadialGradient(lx, ly, lens_r * 0.5, lx, ly, lens_r);
             edge_grad.addColorStop(0, "rgba(0, 0, 0, 0)");
             edge_grad.addColorStop(0.7, "rgba(0, 0, 0, 0)");
-            edge_grad.addColorStop(1, "rgba(0, 0, 0, 0.3)");
+            edge_grad.addColorStop(1, `rgba(0, 0, 0, ${edge_dark})`);
             ctx.beginPath();
             ctx.arc(lx, ly, lens_r, 0, Math.PI * 2);
             ctx.fillStyle = edge_grad;
@@ -290,7 +292,7 @@ export default class RoundStyle extends GaugeStyle {
         const { cx, speedo_cy, speedo_r, font_label } = this.layout;
 
         // Arc the letters "CORES" above the inner gauge
-        const arc_r = speedo_r + font_label * 1.4;
+        const arc_r = speedo_r + font_label * 1.9;
         const arc_cy = speedo_cy;
         const letters = ["C", "O", "R", "E", "S"];
         const letter_spread = 0.1; // radians between letters
@@ -434,11 +436,11 @@ export default class RoundStyle extends GaugeStyle {
 
         // Show billions of instructions, 6 digits zero-padded
         const billions = Math.floor(instructions / 1e9);
-        const digits = String(billions).padStart(12, "0").slice(-12);
+        const digits = String(billions).padStart(11, "0").slice(-11);
 
         // Position in the dead zone at the bottom of the speedometer
-        const digit_count = 12;
-        const digit_h = Math.max(8, Math.round(sr * 0.13));
+        const digit_count = 11;
+        const digit_h = Math.max(8, Math.round(sr * 0.15));
         const digit_w = Math.round(digit_h * 0.65);
         const gap = Math.max(1, Math.round(digit_w * 0.08));
         const total_w = digit_count * digit_w + (digit_count - 1) * gap;
