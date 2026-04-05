@@ -70,6 +70,9 @@ export default class RoundStyle extends GaugeStyle {
 
     init() {
         this.layout = {};
+        this.static_canvas = document.createElement("canvas");
+        this.static_ctx = this.static_canvas.getContext("2d");
+        this.static_signature = null;
     }
 
     resize(width, height) {
@@ -141,57 +144,145 @@ export default class RoundStyle extends GaugeStyle {
             freq_cx, freq_cy, freq_r,
         };
 
+        this.static_signature = null;
         this.render();
     }
 
     render() {
         if (!this.data || !this.w) return;
         const ctx = this.ctx;
+        this._prepare_static_layer();
+
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        ctx.drawImage(this.static_canvas, 0, 0);
+        ctx.restore();
 
-        ctx.fillStyle = COLORS.bg;
-        ctx.fillRect(0, 0, this.w, this.h);
+        this.render_memory_dynamic();
+        this.render_cpu_dynamic();
+        this.render_temperatures_dynamic();
+    }
 
-        this.render_memory();
-        this.render_cpu();
-        this.render_temperatures();
+    _prepare_static_layer() {
+        const signature = this._static_signature();
+        if (
+            signature === this.static_signature &&
+            this.static_canvas.width === this.canvas.width &&
+            this.static_canvas.height === this.canvas.height
+        ) {
+            return;
+        }
+
+        this.static_signature = signature;
+        this.static_canvas.width = this.canvas.width;
+        this.static_canvas.height = this.canvas.height;
+
+        const prev_ctx = this.ctx;
+        const ctx = this.static_ctx;
+        const matrix = prev_ctx.getTransform();
+
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, this.static_canvas.width, this.static_canvas.height);
+        ctx.setTransform(matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f);
+
+        this.ctx = ctx;
+        try {
+            ctx.fillStyle = COLORS.bg;
+            ctx.fillRect(0, 0, this.w, this.h);
+            this.render_memory_static();
+            this.render_cpu_static();
+            this.render_temperatures_static();
+        } finally {
+            this.ctx = prev_ctx;
+        }
+    }
+
+    _static_signature() {
+        const temps = this._flatten_temperature_readings()
+            .map(reading => `${reading.label}:${reading.critical ?? ""}`)
+            .join("|");
+        const fans = this._flatten_fan_readings()
+            .map(reading => reading.label)
+            .join("|");
+        const has_freq = this.data.cpu?.freq_mhz != null ? "1" : "0";
+        return [this.w, this.h, temps, fans, has_freq].join("::");
+    }
+
+    _flatten_temperature_readings() {
+        const temps = this.data.temperatures || {};
+        const readings = [];
+        for (const [chip, sensors] of Object.entries(temps)) {
+            for (const s of sensors) {
+                readings.push({
+                    label: sensor_display_label(chip, s.label),
+                    current: s.current,
+                    high: s.high,
+                    critical: s.critical,
+                });
+            }
+        }
+        return readings;
+    }
+
+    _flatten_fan_readings() {
+        const fans = this.data.fans || {};
+        const readings = [];
+        for (const [, sensors] of Object.entries(fans)) {
+            for (const s of sensors) {
+                if (s.current > 0) {
+                    readings.push({ label: s.label, rpm: s.current });
+                }
+            }
+        }
+        return readings;
     }
 
     // ── CPU section (centre) ──────────────────────────────────
 
-    render_cpu() {
+    render_cpu_static() {
         const L = this.layout;
         const cpu = this.data.cpu;
 
         this._draw_chrome_bezel(L.cx, L.cy, L.R, L.rim_width);
         this._draw_face(L.cx, L.cy, L.R - L.rim_width);
-        this._draw_core_lamps(cpu.per_core);
+        this._draw_core_lamps_static(cpu.per_core.length);
         this._draw_cores_label();
-        this._draw_speedometer(cpu.overall);
-        this._draw_odometer(cpu.instructions_retired);
+        this._draw_speedometer_static();
         this._draw_cpu_label();
 
-        // CPU frequency tach — rendered on top, overlaps main gauge
         if (cpu.freq_mhz != null) {
-            this._draw_tachometer(
+            this._draw_tachometer_static(
                 L.freq_cx, L.freq_cy, L.freq_r,
-                cpu.freq_mhz, 6000, 1000, 500,
+                6000, 1000, 500,
                 v => String(v / 1000), "GHz", "CPU SPEED",
+            );
+        }
+    }
+
+    render_cpu_dynamic() {
+        const L = this.layout;
+        const cpu = this.data.cpu;
+
+        this._draw_core_lamps_dynamic(cpu.per_core);
+        this._draw_speedometer_dynamic(cpu.overall);
+        this._draw_odometer(cpu.instructions_retired);
+
+        if (cpu.freq_mhz != null) {
+            this._draw_tachometer_dynamic(
+                L.freq_cx, L.freq_cy, L.freq_r,
+                cpu.freq_mhz, 6000,
             );
         }
     }
 
     // ── Memory section (left) ─────────────────────────────────
 
-    render_memory() {
+    render_memory_static() {
         const ctx = this.ctx;
         const L = this.layout;
-        const mem = this.data.memory;
-        const pct = mem.percent / 100;
-
         const { fuel_cx: fcx, fuel_cy: fcy, fuel_r: fr, fuel_rim: frw } = L;
 
-        // Chrome bezel & face
         this._draw_chrome_bezel(fcx, fcy, fr, frw);
         this._draw_face(fcx, fcy, fr - frw);
 
@@ -238,7 +329,25 @@ export default class RoundStyle extends GaugeStyle {
             ctx.fillText(m.text, fcx + label_r * Math.cos(a), fcy + label_r * Math.sin(a));
         }
 
-        // ── Needle ──
+        const lbl = Math.max(8, Math.round(fr * 0.12));
+        ctx.font = `600 ${lbl}px "Jost", sans-serif`;
+        ctx.fillStyle = COLORS.label_light;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.letterSpacing = "0.15em";
+        ctx.fillText("MEMORY", fcx, fcy + fr + lbl * 0.6);
+        ctx.letterSpacing = "0px";
+
+    }
+
+    render_memory_dynamic() {
+        const ctx = this.ctx;
+        const L = this.layout;
+        const mem = this.data.memory;
+        const pct = mem.percent / 100;
+        const { fuel_cx: fcx, fuel_cy: fcy, fuel_r: fr, fuel_rim: frw } = L;
+        const inner = fr - frw;
+
         const na = FUEL_START + Math.max(0, Math.min(1, pct)) * FUEL_RANGE;
         const nlen = inner * 0.78;
         const nhw = Math.max(1.2, fr * 0.02);
@@ -255,7 +364,6 @@ export default class RoundStyle extends GaugeStyle {
         ctx.fillStyle = COLORS.needle;
         ctx.fill();
 
-        // Tail
         const tl = inner * 0.12;
         const thw = nhw * 2;
         const tpx = -sn * thw;
@@ -268,22 +376,14 @@ export default class RoundStyle extends GaugeStyle {
         ctx.fillStyle = COLORS.needle;
         ctx.fill();
 
-        // Center cap
         this._draw_needle_cap(fcx, fcy, Math.max(2, fr * 0.06));
 
-        // ── Labels below gauge ──
         const lbl = Math.max(8, Math.round(fr * 0.12));
-        ctx.font = `600 ${lbl}px "Jost", sans-serif`;
-        ctx.fillStyle = COLORS.label_light;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.letterSpacing = "0.15em";
-        ctx.fillText("MEMORY", fcx, fcy + fr + lbl * 0.6);
-        ctx.letterSpacing = "0px";
-
         const det = Math.max(7, Math.round(fr * 0.09));
         ctx.font = `${det}px "Jost", sans-serif`;
         ctx.fillStyle = COLORS.label_light;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
         ctx.fillText(
             format_bytes(mem.used_bytes) + " / " + format_bytes(mem.total_bytes),
             fcx, fcy + fr + lbl * 0.6 + lbl * 1.3,
@@ -292,34 +392,11 @@ export default class RoundStyle extends GaugeStyle {
 
     // ── Temperature / Fan section (right) ─────────────────────
 
-    render_temperatures() {
+    render_temperatures_static() {
         const ctx = this.ctx;
         const L = this.layout;
-        const temps = this.data.temperatures || {};
-        const fans = this.data.fans || {};
-
-        // Flatten temperature readings
-        const readings = [];
-        for (const [chip, sensors] of Object.entries(temps)) {
-            for (const s of sensors) {
-                readings.push({
-                    label: sensor_display_label(chip, s.label),
-                    current: s.current,
-                    high: s.high,
-                    critical: s.critical,
-                });
-            }
-        }
-
-        // Flatten fan readings — only non-zero RPM
-        const fan_readings = [];
-        for (const [, sensors] of Object.entries(fans)) {
-            for (const s of sensors) {
-                if (s.current > 0) {
-                    fan_readings.push({ label: s.label, rpm: s.current });
-                }
-            }
-        }
+        const readings = this._flatten_temperature_readings();
+        const fan_readings = this._flatten_fan_readings();
 
         if (readings.length === 0 && fan_readings.length === 0) return;
 
@@ -347,23 +424,55 @@ export default class RoundStyle extends GaugeStyle {
 
             for (let i = 0; i < count; i++) {
                 const tcx = L.right_x + spacing * (i + 0.5);
-                this._draw_thermometer(tcx, thermo_top, thermo_h, tube_w, readings[i]);
+                this._draw_thermometer_static(tcx, thermo_top, thermo_h, tube_w, readings[i]);
             }
         }
 
-        // ── Fan tachometer ──
         if (fan_readings.length > 0) {
-            this._draw_tachometer(
+            this._draw_tachometer_static(
                 L.tach_cx, L.tach_cy, L.tach_r,
-                fan_readings[0].rpm, 2000, 500, 250,
+                2000, 500, 250,
                 v => String(v / 100), "\u00d7100 RPM", fan_readings[0].label,
+            );
+        }
+    }
+
+    render_temperatures_dynamic() {
+        const L = this.layout;
+        const readings = this._flatten_temperature_readings();
+        const fan_readings = this._flatten_fan_readings();
+
+        if (readings.length === 0 && fan_readings.length === 0) return;
+
+        const title_size = Math.max(9, Math.round(L.fuel_r * 0.12));
+
+        if (readings.length > 0) {
+            const thermo_top = L.panel_top + title_size * 2.5;
+            const thermo_bottom = fan_readings.length > 0
+                ? L.tach_cy - L.tach_r - title_size * 2
+                : L.panel_bottom - title_size * 3;
+            const thermo_h = thermo_bottom - thermo_top;
+            const count = readings.length;
+            const spacing = L.right_w / count;
+            const tube_w = Math.max(6, Math.min(Math.round(spacing * 0.28), 18));
+
+            for (let i = 0; i < count; i++) {
+                const tcx = L.right_x + spacing * (i + 0.5);
+                this._draw_thermometer_dynamic(tcx, thermo_top, thermo_h, tube_w, readings[i]);
+            }
+        }
+
+        if (fan_readings.length > 0) {
+            this._draw_tachometer_dynamic(
+                L.tach_cx, L.tach_cy, L.tach_r,
+                fan_readings[0].rpm, 2000,
             );
         }
     }
 
     // ── Thermometer helper ────────────────────────────────────
 
-    _draw_thermometer(cx, top_y, height, tube_w, reading) {
+    _draw_thermometer_static(cx, top_y, height, tube_w, reading) {
         const ctx = this.ctx;
         const bulb_r = tube_w * 1.1;
         const half = tube_w / 2;
@@ -372,13 +481,6 @@ export default class RoundStyle extends GaugeStyle {
         const bulb_cy = top_y + height - bulb_r;
         const tube_bottom = bulb_cy;
 
-        // Temperature → fill fraction (20 °C – 100 °C range)
-        const t_min = 20, t_max = 100;
-        const t = Math.max(0, Math.min(1, (reading.current - t_min) / (t_max - t_min)));
-        const usable_h = tube_bottom - tube_top - half;
-        const fill_h = t * usable_h;
-
-        // ── Glass bulb ──
         ctx.beginPath();
         ctx.arc(cx, bulb_cy, bulb_r, 0, Math.PI * 2);
         ctx.fillStyle = "#d8d4c8";
@@ -395,27 +497,6 @@ export default class RoundStyle extends GaugeStyle {
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
-        // ── Mercury (bulb always filled) ──
-        const mw = tube_w * 0.5;
-        const mh = mw / 2;
-        const mbr = bulb_r * 0.7;
-
-        ctx.beginPath();
-        ctx.arc(cx, bulb_cy, mbr, 0, Math.PI * 2);
-        ctx.fillStyle = COLORS.mercury;
-        ctx.fill();
-
-        if (fill_h > 0) {
-            const merc_top = tube_bottom - fill_h;
-            ctx.fillStyle = COLORS.mercury;
-            ctx.fillRect(cx - mh, merc_top, mw, tube_bottom - merc_top);
-            // Rounded top cap of mercury column
-            ctx.beginPath();
-            ctx.arc(cx, merc_top, mh, Math.PI, 0);
-            ctx.fill();
-        }
-
-        // ── Glass highlight ──
         ctx.save();
         const hl = ctx.createLinearGradient(cx - half, 0, cx + half, 0);
         hl.addColorStop(0, "rgba(255,255,255,0)");
@@ -426,7 +507,9 @@ export default class RoundStyle extends GaugeStyle {
         ctx.fillRect(cx - half, tube_top, tube_w, tube_bottom - tube_top);
         ctx.restore();
 
-        // ── Scale ticks (every 20 °C) ──
+        const t_min = 20, t_max = 100;
+        const usable_h = tube_bottom - tube_top - half;
+
         for (let temp = 20; temp <= 100; temp += 20) {
             const mt = (temp - t_min) / (t_max - t_min);
             const my = tube_bottom - mt * usable_h;
@@ -460,24 +543,55 @@ export default class RoundStyle extends GaugeStyle {
             ctx.stroke();
         }
 
-        // ── Value below bulb ──
+        const vf = Math.max(7, Math.round(tube_w * 0.65));
+        const lf = Math.max(6, Math.round(tube_w * 0.55));
+        ctx.font = `${lf}px "Jost", sans-serif`;
+        ctx.fillStyle = COLORS.label_light;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(reading.label, cx, bulb_cy + bulb_r + 3 + vf * 1.3);
+    }
+
+    _draw_thermometer_dynamic(cx, top_y, height, tube_w, reading) {
+        const ctx = this.ctx;
+        const bulb_r = tube_w * 1.1;
+        const half = tube_w / 2;
+        const tube_top = top_y;
+        const bulb_cy = top_y + height - bulb_r;
+        const tube_bottom = bulb_cy;
+        const t_min = 20, t_max = 100;
+        const t = Math.max(0, Math.min(1, (reading.current - t_min) / (t_max - t_min)));
+        const usable_h = tube_bottom - tube_top - half;
+        const fill_h = t * usable_h;
+        const mw = tube_w * 0.5;
+        const mh = mw / 2;
+        const mbr = bulb_r * 0.7;
+
+        ctx.beginPath();
+        ctx.arc(cx, bulb_cy, mbr, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.mercury;
+        ctx.fill();
+
+        if (fill_h > 0) {
+            const merc_top = tube_bottom - fill_h;
+            ctx.fillStyle = COLORS.mercury;
+            ctx.fillRect(cx - mh, merc_top, mw, tube_bottom - merc_top);
+            ctx.beginPath();
+            ctx.arc(cx, merc_top, mh, Math.PI, 0);
+            ctx.fill();
+        }
+
         const vf = Math.max(7, Math.round(tube_w * 0.65));
         ctx.font = `600 ${vf}px "Jost", sans-serif`;
         ctx.fillStyle = "#cccccc";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillText(`${reading.current.toFixed(0)}\u00b0`, cx, bulb_cy + bulb_r + 3);
-
-        // ── Label below value ──
-        const lf = Math.max(6, Math.round(tube_w * 0.55));
-        ctx.font = `${lf}px "Jost", sans-serif`;
-        ctx.fillStyle = COLORS.label_light;
-        ctx.fillText(reading.label, cx, bulb_cy + bulb_r + 3 + vf * 1.3);
     }
 
     // ── Tachometer helper (reused for fan RPM and CPU frequency) ─
 
-    _draw_tachometer(cx, cy, r, value, max_val, major_step, minor_step, format_num, unit_text, name_text) {
+    _draw_tachometer_static(cx, cy, r, max_val, major_step, minor_step, format_num, unit_text, name_text) {
         const ctx = this.ctx;
         const rim_w = Math.max(3, Math.round(r * 0.07));
 
@@ -523,7 +637,18 @@ export default class RoundStyle extends GaugeStyle {
         ctx.textBaseline = "middle";
         ctx.fillText(unit_text, cx, cy + inner * 0.3);
 
-        // Needle
+        const ls = Math.max(7, Math.round(r * 0.11));
+        ctx.font = `600 ${ls}px "Jost", sans-serif`;
+        ctx.fillStyle = COLORS.label_light;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(name_text, cx, cy + r + ls * 0.5);
+    }
+
+    _draw_tachometer_dynamic(cx, cy, r, value, max_val) {
+        const ctx = this.ctx;
+        const rim_w = Math.max(3, Math.round(r * 0.07));
+        const inner = r - rim_w;
         const clamped = Math.max(0, Math.min(max_val, value));
         const na = TACH_START + (clamped / max_val) * TACH_RANGE;
         const nlen = inner * 0.78;
@@ -541,7 +666,6 @@ export default class RoundStyle extends GaugeStyle {
         ctx.fillStyle = COLORS.needle;
         ctx.fill();
 
-        // Tail
         const tl = inner * 0.12;
         const thw = nhw * 2;
         const tpx = -sn * thw;
@@ -555,14 +679,6 @@ export default class RoundStyle extends GaugeStyle {
         ctx.fill();
 
         this._draw_needle_cap(cx, cy, Math.max(2, r * 0.06));
-
-        // Name below gauge
-        const ls = Math.max(7, Math.round(r * 0.11));
-        ctx.font = `600 ${ls}px "Jost", sans-serif`;
-        ctx.fillStyle = COLORS.label_light;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(name_text, cx, cy + r + ls * 0.5);
     }
 
     // ── Shared drawing helpers ────────────────────────────────
@@ -621,10 +737,9 @@ export default class RoundStyle extends GaugeStyle {
 
     // ── Core lamps (unchanged) ────────────────────────────────
 
-    _draw_core_lamps(per_core) {
+    _draw_core_lamps_static(count) {
         const ctx = this.ctx;
         const { cx, cy, lamp_arc_r, lamp_r } = this.layout;
-        const count = per_core.length;
         const bezel_r = lamp_r * 1.3;
         const lens_r = lamp_r * 0.92;
 
@@ -633,23 +748,6 @@ export default class RoundStyle extends GaugeStyle {
             const angle = LAMP_SWEEP_START + t * LAMP_SWEEP_RANGE;
             const lx = cx + lamp_arc_r * Math.cos(angle);
             const ly = cy + lamp_arc_r * Math.sin(angle);
-            const b = per_core[i] / 100;
-
-            if (b > 0.05) {
-                ctx.save();
-                ctx.globalAlpha = b * 0.8;
-                const glow_r = lamp_r * 4.5;
-                const glow = ctx.createRadialGradient(lx, ly, lamp_r * 0.1, lx, ly, glow_r);
-                glow.addColorStop(0, "rgba(255, 170, 50, 0.8)");
-                glow.addColorStop(0.25, "rgba(255, 140, 30, 0.4)");
-                glow.addColorStop(0.5, "rgba(255, 120, 20, 0.15)");
-                glow.addColorStop(1, "rgba(255, 100, 0, 0)");
-                ctx.beginPath();
-                ctx.arc(lx, ly, glow_r, 0, Math.PI * 2);
-                ctx.fillStyle = glow;
-                ctx.fill();
-                ctx.restore();
-            }
 
             ctx.save();
             ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
@@ -689,6 +787,37 @@ export default class RoundStyle extends GaugeStyle {
             ctx.arc(lx, ly, lens_r + 0.5, 0, Math.PI * 2);
             ctx.fillStyle = "#1a1a1a";
             ctx.fill();
+        }
+    }
+
+    _draw_core_lamps_dynamic(per_core) {
+        const ctx = this.ctx;
+        const { cx, cy, lamp_arc_r, lamp_r } = this.layout;
+        const count = per_core.length;
+        const lens_r = lamp_r * 0.92;
+
+        for (let i = 0; i < count; i++) {
+            const t = count > 1 ? i / (count - 1) : 0.5;
+            const angle = LAMP_SWEEP_START + t * LAMP_SWEEP_RANGE;
+            const lx = cx + lamp_arc_r * Math.cos(angle);
+            const ly = cy + lamp_arc_r * Math.sin(angle);
+            const b = per_core[i] / 100;
+
+            if (b > 0.05) {
+                ctx.save();
+                ctx.globalAlpha = b * 0.8;
+                const glow_r = lamp_r * 4.5;
+                const glow = ctx.createRadialGradient(lx, ly, lamp_r * 0.1, lx, ly, glow_r);
+                glow.addColorStop(0, "rgba(255, 170, 50, 0.8)");
+                glow.addColorStop(0.25, "rgba(255, 140, 30, 0.4)");
+                glow.addColorStop(0.5, "rgba(255, 120, 20, 0.15)");
+                glow.addColorStop(1, "rgba(255, 100, 0, 0)");
+                ctx.beginPath();
+                ctx.arc(lx, ly, glow_r, 0, Math.PI * 2);
+                ctx.fillStyle = glow;
+                ctx.fill();
+                ctx.restore();
+            }
 
             const dome_offset_x = lens_r * 0.3;
             const dome_offset_y = lens_r * 0.3;
@@ -792,7 +921,7 @@ export default class RoundStyle extends GaugeStyle {
         ctx.letterSpacing = "0px";
     }
 
-    _draw_speedometer(overall) {
+    _draw_speedometer_static() {
         const ctx = this.ctx;
         const { speedo_cx: sx, speedo_cy: sy, speedo_r: sr, font_number } = this.layout;
 
@@ -834,7 +963,11 @@ export default class RoundStyle extends GaugeStyle {
                 ctx.fillText(String(pct), sx + number_r * cos_a, sy + number_r * sin_a);
             }
         }
+    }
 
+    _draw_speedometer_dynamic(overall) {
+        const ctx = this.ctx;
+        const { speedo_cx: sx, speedo_cy: sy, speedo_r: sr } = this.layout;
         const needle_angle = SWEEP_START + (Math.min(100, Math.max(0, overall)) / 100) * SWEEP_RANGE;
         const needle_len = sr * 0.82;
         const needle_half_w = Math.max(1.5, sr * 0.025);

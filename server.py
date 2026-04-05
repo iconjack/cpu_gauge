@@ -321,8 +321,16 @@ def get_connect_urls(port: int) -> list[str]:
     return urls
 
 
+@web.middleware
+async def no_cache_middleware(request, handler):
+    response = await handler(request)
+    if request.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
 def create_app() -> web.Application:
-    app = web.Application()
+    app = web.Application(middlewares=[no_cache_middleware])
     app["connected_clients"] = set()
     app.router.add_get("/", index_handler)
     app.router.add_get("/ws", websocket_handler)
