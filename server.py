@@ -167,9 +167,26 @@ def collect_metrics() -> dict:
                 entries.append({
                     "label": r.label or chip,
                     "current": r.current,
+                    "high": r.high,
+                    "critical": r.critical,
                 })
             if entries:
                 temps[chip] = entries
+    except Exception:
+        pass
+
+    fans = {}
+    try:
+        sensor_fans = psutil.sensors_fans()
+        for chip, readings in sensor_fans.items():
+            fan_entries = []
+            for r in readings:
+                fan_entries.append({
+                    "label": r.label or chip,
+                    "current": r.current,
+                })
+            if fan_entries:
+                fans[chip] = fan_entries
     except Exception:
         pass
 
@@ -198,6 +215,7 @@ def collect_metrics() -> dict:
             "percent": mem.percent,
         },
         "temperatures": temps,
+        "fans": fans,
     }
 
 
