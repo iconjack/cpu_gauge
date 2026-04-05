@@ -158,17 +158,25 @@ def collect_metrics() -> dict:
     mem = psutil.virtual_memory()
     boot_time = psutil.boot_time()
 
+    # psutil returns null for k10temp critical thresholds, so we hardcode
+    # Tjmax for the Ryzen 5 9600X. Source:
+    # https://www.techpowerup.com/cpu-specs/ryzen-5-9600x.c3652
+    k10temp_critical = 95.0
+
     temps = {}
     try:
         sensor_temps = psutil.sensors_temperatures()
         for chip, readings in sensor_temps.items():
             entries = []
             for r in readings:
+                critical = r.critical
+                if chip == "k10temp" and critical is None:
+                    critical = k10temp_critical
                 entries.append({
                     "label": r.label or chip,
                     "current": r.current,
                     "high": r.high,
-                    "critical": r.critical,
+                    "critical": critical,
                 })
             if entries:
                 temps[chip] = entries
@@ -190,6 +198,8 @@ def collect_metrics() -> dict:
     except Exception:
         pass
 
+    freq = psutil.cpu_freq()
+
     instructions = None
     if instructions_counter.mode:
         try:
@@ -207,6 +217,9 @@ def collect_metrics() -> dict:
             "count_logical": psutil.cpu_count(logical=True),
             "count_physical": psutil.cpu_count(logical=False),
             "instructions_retired": instructions,
+            "freq_mhz": freq.current if freq else None,
+            "freq_min_mhz": freq.min if freq else None,
+            "freq_max_mhz": freq.max if freq else None,
         },
         "memory": {
             "total_bytes": mem.total,

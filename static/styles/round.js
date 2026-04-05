@@ -12,10 +12,9 @@ const LAMP_SWEEP_START = (270 * DEG) - (LAMP_SWEEP_RANGE / 2);
 const FUEL_START = 210 * DEG;
 const FUEL_RANGE = 120 * DEG;
 
-// Fan tachometer
+// Tachometer-style dials (fan RPM, CPU frequency)
 const TACH_START = 150 * DEG;
 const TACH_RANGE = 240 * DEG;
-const TACH_MAX_RPM = 2000;
 
 // Friendly labels for temperature chips
 const SENSOR_LABELS = {
@@ -82,11 +81,11 @@ export default class RoundStyle extends GaugeStyle {
         // Size main gauge so side panels get at least 22 % of width each
         const min_side = Math.round(width * 0.22);
         const R = Math.floor(Math.min(
-            (height - pad * 2) * 0.42,
+            (height - pad * 2) * 0.37,
             (width - pad * 2 - min_side * 2) / 2,
         ));
         const cx = Math.round(width / 2);
-        const cy = Math.round(height / 2);
+        const cy = Math.round(height * 0.45);
 
         // Side panel boundaries
         const panel_gap = Math.round(R * 0.06);
@@ -110,6 +109,11 @@ export default class RoundStyle extends GaugeStyle {
         const tach_cx = right_x + right_w / 2;
         const tach_cy = panel_bottom - tach_r * 1.8;
 
+        // CPU frequency tach — below-left of main gauge, overlapping
+        const freq_r = Math.round(R * 0.28);
+        const freq_cx = Math.round(cx - R * 0.7);
+        const freq_cy = Math.round(cy + R * 0.9);
+
         this.layout = {
             cx, cy, R, pad,
             rim_width: Math.max(4, Math.round(R * 0.06)),
@@ -132,6 +136,9 @@ export default class RoundStyle extends GaugeStyle {
 
             // Tachometer (fan RPM)
             tach_cx, tach_cy, tach_r,
+
+            // CPU frequency tach
+            freq_cx, freq_cy, freq_r,
         };
 
         this.render();
@@ -163,6 +170,15 @@ export default class RoundStyle extends GaugeStyle {
         this._draw_speedometer(cpu.overall);
         this._draw_odometer(cpu.instructions_retired);
         this._draw_cpu_label();
+
+        // CPU frequency tach — rendered on top, overlaps main gauge
+        if (cpu.freq_mhz != null) {
+            this._draw_tachometer(
+                L.freq_cx, L.freq_cy, L.freq_r,
+                cpu.freq_mhz, 6000, 1000, 500,
+                v => String(v / 1000), "GHz", "CPU SPEED",
+            );
+        }
     }
 
     // ── Memory section (left) ─────────────────────────────────
@@ -339,7 +355,8 @@ export default class RoundStyle extends GaugeStyle {
         if (fan_readings.length > 0) {
             this._draw_tachometer(
                 L.tach_cx, L.tach_cy, L.tach_r,
-                fan_readings[0].rpm, fan_readings[0].label,
+                fan_readings[0].rpm, 2000, 500, 250,
+                v => String(v / 100), "\u00d7100 RPM", fan_readings[0].label,
             );
         }
     }
@@ -458,9 +475,9 @@ export default class RoundStyle extends GaugeStyle {
         ctx.fillText(reading.label, cx, bulb_cy + bulb_r + 3 + vf * 1.3);
     }
 
-    // ── Fan tachometer helper ─────────────────────────────────
+    // ── Tachometer helper (reused for fan RPM and CPU frequency) ─
 
-    _draw_tachometer(cx, cy, r, rpm, label) {
+    _draw_tachometer(cx, cy, r, value, max_val, major_step, minor_step, format_num, unit_text, name_text) {
         const ctx = this.ctx;
         const rim_w = Math.max(3, Math.round(r * 0.07));
 
@@ -473,13 +490,12 @@ export default class RoundStyle extends GaugeStyle {
         const tick_in_minor = inner * 0.78;
         const number_r = inner * 0.55;
 
-        // Ticks: minor every 250 RPM, major every 500
-        for (let v = 0; v <= TACH_MAX_RPM; v += 250) {
-            const t = v / TACH_MAX_RPM;
+        for (let v = 0; v <= max_val; v += minor_step) {
+            const t = v / max_val;
             const angle = TACH_START + t * TACH_RANGE;
             const ca = Math.cos(angle);
             const sa = Math.sin(angle);
-            const major = v % 500 === 0;
+            const major = v % major_step === 0;
 
             ctx.beginPath();
             ctx.moveTo(cx + tick_out * ca, cy + tick_out * sa);
@@ -495,22 +511,21 @@ export default class RoundStyle extends GaugeStyle {
                 ctx.fillStyle = COLORS.number;
                 ctx.textAlign = "center";
                 ctx.textBaseline = "middle";
-                // Display as ÷100 for clean face numbers (0, 5, 10, 15, 20)
-                ctx.fillText(String(v / 100), cx + number_r * ca, cy + number_r * sa);
+                ctx.fillText(format_num(v), cx + number_r * ca, cy + number_r * sa);
             }
         }
 
-        // "×100 RPM" label in the dead zone at bottom of face
+        // Unit label in the dead zone at bottom of face
         const unit_fs = Math.max(5, Math.round(r * 0.08));
         ctx.font = `${unit_fs}px "Jost", sans-serif`;
         ctx.fillStyle = COLORS.label;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText("\u00d7100 RPM", cx, cy + inner * 0.3);
+        ctx.fillText(unit_text, cx, cy + inner * 0.3);
 
         // Needle
-        const clamped = Math.max(0, Math.min(TACH_MAX_RPM, rpm));
-        const na = TACH_START + (clamped / TACH_MAX_RPM) * TACH_RANGE;
+        const clamped = Math.max(0, Math.min(max_val, value));
+        const na = TACH_START + (clamped / max_val) * TACH_RANGE;
         const nlen = inner * 0.78;
         const nhw = Math.max(1, r * 0.02);
         const cn = Math.cos(na);
@@ -541,13 +556,13 @@ export default class RoundStyle extends GaugeStyle {
 
         this._draw_needle_cap(cx, cy, Math.max(2, r * 0.06));
 
-        // Fan name below gauge
+        // Name below gauge
         const ls = Math.max(7, Math.round(r * 0.11));
         ctx.font = `600 ${ls}px "Jost", sans-serif`;
         ctx.fillStyle = COLORS.label_light;
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        ctx.fillText(label, cx, cy + r + ls * 0.5);
+        ctx.fillText(name_text, cx, cy + r + ls * 0.5);
     }
 
     // ── Shared drawing helpers ────────────────────────────────
