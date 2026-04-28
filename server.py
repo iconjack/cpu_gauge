@@ -21,7 +21,7 @@ import psutil
 from aiohttp import web
 
 HOST = "0.0.0.0"
-PORT = 8080
+PORT = 8008
 INTERVAL = 1.0
 STATIC_DIR = Path(__file__).parent / "static"
 

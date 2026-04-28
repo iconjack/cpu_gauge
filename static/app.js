@@ -9,7 +9,7 @@ let canvas = null;
 
 function get_style_name() {
     const path = location.pathname.replace(/^\/+|\/+$/g, "");
-    if (!path || !/^[a-z0-9_-]+$/.test(path)) return "plain";
+    if (!path || !/^[a-z0-9_-]+$/.test(path)) return "round";
     return path;
 }
 
